@@ -1,49 +1,23 @@
-# Engine Digital Twin Dashboard — GitHub Pages Edition
+Problem Statement 26054: AI-Enabled Real-Time Digital Twin for Aero Piston Engines in MALE UAVs
 
-This is the free, static edition of the Engine Digital Twin Dashboard. It runs the simulator in the browser, so it needs no server, database, API key, or payment method.
+MALE UAVs require highly reliable propulsion systems for long-duration missions. Existing engine monitoring is mainly threshold-based and reactive, detecting faults after abnormal conditions occur. It has limited capability for early fault prediction, degradation tracking, RUL estimation, and mission-wise simulation.
 
-The ZIP includes both the source app and a prebuilt `docs/` folder. You can deploy it with GitHub Actions or with GitHub's simpler branch-based Pages option.
+The proposed solution is an AI-enabled Digital Twin that continuously mirrors the physical aero-piston engine using real-time sensor data, physics-based models, engine performance data, and AI/ML analytics.
 
-## GitHub Pages deployment
+Key Features
 
-1. Create a new GitHub repository.
-2. Upload the **contents** of this folder to the repository root. Do not upload the outer folder itself.
-3. Push the files to the `main` branch.
+Real-time monitoring of RPM, CHT, EGT, oil pressure/temperature, fuel flow, vibration, battery/alternator and injection timing.
+Anomaly and fault detection for misfire, injector issues, lubrication problems, sensor failure, overheating, combustion instability and abnormal vibration.
+AI/ML-based RUL estimation, degradation tracking and predictive maintenance.
+Simulation and replay of engine behavior under high altitude, endurance missions, hot weather and rapid throttle changes.
+Dashboard showing engine health, alerts, efficiency trends and maintenance recommendations.
+Support for CAN/SocketCAN, ECU/FADEC, edge computing and GCS integration.
+Expected Deliverables
 
-### Option A — GitHub Actions
-
-1. Open **Settings → Pages**.
-2. Under **Build and deployment**, choose **GitHub Actions**.
-3. Open the **Actions** tab and wait for **Deploy dashboard to GitHub Pages** to finish.
-4. Open the Pages URL shown in **Settings → Pages**.
-
-### Option B — Deploy without Actions
-
-1. Open **Settings → Pages**.
-2. Under **Build and deployment**, choose **Deploy from a branch**.
-3. Select the `main` branch and the `/docs` folder.
-4. Save, then open the Pages URL shown in **Settings → Pages**.
-
-Use Option B if the Actions workflow does not appear. The `docs/` folder is already a browser-ready production build.
-
-Every push to `main` automatically rebuilds and redeploys the dashboard.
-
-## Run locally
-
-```bash
-npm install
-npm run dev
-```
-
-## Demo behavior
-
-The browser contains a deterministic simulator with:
-
-- Live telemetry polling
-- Engine schematic sensor indicators
-- Anomaly score and health state
-- Remaining useful life gauge
-- Soft and hard fault injection
-- Reset to nominal operation
-
-Because this version is static, simulator state lives in the browser and resets when the page is reloaded.
+Functional Digital Twin prototype
+Engine simulation model
+AI/ML anomaly detection and RUL module
+Visualization dashboard
+Demonstration using simulated/real engine data
+Technical documentation and deployment roadmap
+Innovation: Physics-informed AI, Edge AI, hybrid models, Explainable AI, secure telemetry and autonomous maintenance advisory.
