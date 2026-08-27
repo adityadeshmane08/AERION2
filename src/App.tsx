@@ -49,6 +49,7 @@ type EngineState = {
   confidence: number;
 };
 type TelemetryPoint = Pick<EngineState, 'timestamp' | 'cycle' | 'cylinder_head_temp' | 'oil_pressure' | 'vibration' | 'rpm' | 'fuel_flow' | 'exhaust_gas_temp'>;
+type UAV = { id: string; name: string; model: string };
 
 const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO !== 'false';
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '');
@@ -116,21 +117,27 @@ function staticState(): EngineState {
 
 resetStaticHistory();
 
+const staticUavs: UAV[] = [
+  { id: 'uav-01', name: 'Falcon-9E', model: 'MALE Class-II' },
+  { id: 'uav-02', name: 'Sentinel-X', model: 'MALE Class-III' },
+];
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (STATIC_DEMO) {
     if (path === '/healthz') return { status: 'ok' } as T;
-    if (path === '/engine/state') return staticState() as T;
-    if (path.startsWith('/engine/history')) {
+    if (path === '/uavs') return staticUavs as T;
+    if (path.endsWith('/state')) return staticState() as T;
+    if (path.includes('/history')) {
       advanceStaticDemo();
       const limit = Math.min(240, Math.max(10, Number(new URLSearchParams(path.split('?')[1] ?? '').get('limit') ?? 60)));
       return staticHistory.slice(-limit) as T;
     }
-    if (path === '/engine/fault') {
+    if (path.endsWith('/fault')) {
       const payload = init?.body ? JSON.parse(String(init.body)) : {};
       staticFault = { severity: payload.severity === 'soft' ? 'soft' : 'hard', startCycle: staticCycle };
       return staticState() as T;
     }
-    if (path === '/engine/reset') {
+    if (path.endsWith('/reset')) {
       staticFault = null;
       staticCycle = 742;
       staticLastAdvancedAt = Date.now();
@@ -294,16 +301,56 @@ function TelemetryChart({ history }: { history: Array<{ timestamp: string; rpm: 
   );
 }
 
-function SimulationControls({ faultInjected, onNotice }: { faultInjected: boolean; onNotice: (text: string) => void }) {
+function UavSelector({ uavs, activeId, onSelect }: { uavs: UAV[]; activeId: string | null; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const active = uavs.find((u) => u.id === activeId);
+
+  if (uavs.length === 0) {
+    return <span className="mono text-[10px] text-muted-foreground">Loading UAVs…</span>;
+  }
+
+  return (
+    <div className="relative">
+      <button
+        data-testid="button-uav-selector"
+        onClick={() => setOpen((v) => !v)}
+        className="mono flex items-center gap-1.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {active ? `${active.id.toUpperCase()} / ${active.model}` : 'Select UAV'}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <>
+          <button aria-label="Close UAV selector" className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-2 w-[220px] rounded-sm border border-card-border bg-card shadow-2xl">
+            {uavs.map((uav) => (
+              <button
+                key={uav.id}
+                data-testid={`option-uav-${uav.id}`}
+                onClick={() => { onSelect(uav.id); setOpen(false); }}
+                className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-[11px] transition-colors hover:bg-secondary/60 ${uav.id === activeId ? 'text-primary' : 'text-foreground'}`}
+              >
+                <span><span className="font-semibold">{uav.name}</span><span className="mono ml-2 text-[9px] text-muted-foreground">{uav.model}</span></span>
+                {uav.id === activeId && <Check className="h-3.5 w-3.5" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SimulationControls({ uavId, faultInjected, onNotice }: { uavId: string; faultInjected: boolean; onNotice: (text: string) => void }) {
   const queryClient = useQueryClient();
   const [severity, setSeverity] = useState<Severity>('soft');
   const [confirming, setConfirming] = useState(false);
-  const injectFault = useMutation({ mutationFn: (data: { severity: Severity }) => apiFetch<EngineState>('/engine/fault', { method: 'POST', body: JSON.stringify(data) }) });
-  const resetSimulation = useMutation({ mutationFn: () => apiFetch<EngineState>('/engine/reset', { method: 'POST' }) });
+  const injectFault = useMutation({ mutationFn: (data: { severity: Severity }) => apiFetch<EngineState>(`/uavs/${uavId}/fault`, { method: 'POST', body: JSON.stringify(data) }) });
+  const resetSimulation = useMutation({ mutationFn: () => apiFetch<EngineState>(`/uavs/${uavId}/reset`, { method: 'POST' }) });
 
   const applyState = (next: typeof fallbackState) => {
-    queryClient.setQueryData(['engine', 'state'], next);
-    queryClient.invalidateQueries({ queryKey: ['engine', 'history'] });
+    queryClient.setQueryData(['engine', 'state', uavId], next);
+    queryClient.invalidateQueries({ queryKey: ['engine', 'history', uavId] });
   };
 
   const confirmFault = () => {
@@ -354,18 +401,50 @@ function SimulationControls({ faultInjected, onNotice }: { faultInjected: boolea
   );
 }
 
+function getInitialUavId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('uav');
+}
+
 function Overview() {
   const [railOpen, setRailOpen] = useState(false);
   const [notice, setNotice] = useState('');
-  const stateQuery = useQuery({ queryKey: ['engine', 'state'], queryFn: () => apiFetch<EngineState>('/engine/state'), refetchInterval: 2500, refetchOnWindowFocus: true });
-  const historyQuery = useQuery({ queryKey: ['engine', 'history'], queryFn: () => apiFetch<TelemetryPoint[]>('/engine/history?limit=60'), refetchInterval: 5000 });
+  const [selectedUavId, setSelectedUavId] = useState<string | null>(getInitialUavId);
+
+  const uavsQuery = useQuery({ queryKey: ['uavs'], queryFn: () => apiFetch<UAV[]>('/uavs'), staleTime: 60_000 });
+  const uavs = uavsQuery.data ?? [];
+
+  // Default to the first available UAV once the list loads, unless the URL already specified one.
+  const activeUavId = selectedUavId ?? uavs[0]?.id ?? null;
+
+  const selectUav = (id: string) => {
+    setSelectedUavId(id);
+    const params = new URLSearchParams(window.location.search);
+    params.set('uav', id);
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  };
+
+  const stateQuery = useQuery({
+    queryKey: ['engine', 'state', activeUavId],
+    queryFn: () => apiFetch<EngineState>(`/uavs/${activeUavId}/state`),
+    refetchInterval: 2500,
+    refetchOnWindowFocus: true,
+    enabled: !!activeUavId,
+  });
+  const historyQuery = useQuery({
+    queryKey: ['engine', 'history', activeUavId],
+    queryFn: () => apiFetch<TelemetryPoint[]>(`/uavs/${activeUavId}/history?limit=60`),
+    refetchInterval: 5000,
+    enabled: !!activeUavId,
+  });
   const healthQuery = useQuery({ queryKey: ['health'], queryFn: () => apiFetch<{ status: string }>('/healthz'), refetchInterval: 5000 });
   const state = stateQuery.data ?? fallbackState;
   const status = (state.status ?? 'nominal') as Status;
   const history = historyQuery.data ?? [];
-  const isLoading = stateQuery.isLoading;
+  const isLoading = stateQuery.isLoading || !activeUavId;
   const isError = stateQuery.isError;
   const lastUpdated = state.timestamp ? formatTime(state.timestamp) : '--:--:--';
+  const activeUav = uavs.find((u) => u.id === activeUavId);
 
   return (
     <div className="scanline min-h-[100dvh] bg-background text-foreground">
@@ -375,7 +454,7 @@ function Overview() {
           <header className="flex h-[78px] items-center justify-between border-b border-border px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
               <button aria-label="Open navigation" data-testid="button-open-navigation" className="text-muted-foreground hover:text-foreground md:hidden" onClick={() => setRailOpen(true)}><Menu className="h-5 w-5" /></button>
-              <div><div className="flex items-center gap-2"><span className="mono text-[10px] uppercase tracking-[.2em] text-primary">LIVE CONSOLE</span><span className="h-1 w-1 rounded-full bg-border" /><span className="mono text-[10px] text-muted-foreground">UAV-PT6 / TEST CELL 04</span></div><h1 className="mt-1 text-lg font-extrabold tracking-[-.03em] sm:text-xl">Engine overview</h1></div>
+              <div><div className="flex items-center gap-2"><span className="mono text-[10px] uppercase tracking-[.2em] text-primary">LIVE CONSOLE</span><span className="h-1 w-1 rounded-full bg-border" /><UavSelector uavs={uavs} activeId={activeUavId} onSelect={selectUav} /></div><h1 className="mt-1 text-lg font-extrabold tracking-[-.03em] sm:text-xl">Engine overview{activeUav ? ` — ${activeUav.name}` : ''}</h1></div>
             </div>
             <div className="flex items-center gap-3 sm:gap-5">
               <div className="hidden text-right sm:block"><div className="mono text-[9px] uppercase tracking-[.15em] text-muted-foreground">Last packet</div><div data-testid="text-last-packet" className="mono mt-1 text-[11px] text-foreground">{lastUpdated} UTC</div></div>
@@ -408,7 +487,7 @@ function Overview() {
                     <div className="grid grid-cols-2 border-t border-card-border sm:grid-cols-4"><MiniValue label="Fuel flow" value={`${state.fuel_flow.toFixed(1)} L/h`} icon={BatteryCharging} /><MiniValue label="Exhaust gas" value={`${state.exhaust_gas_temp.toFixed(0)} °C`} icon={Zap} /><MiniValue label="Current cycle" value={state.cycle.toLocaleString()} icon={CircleGauge} /><MiniValue label="Fault state" value={state.fault_injected ? 'Injected' : 'Clear'} icon={state.fault_injected ? Siren : ShieldCheck} warn={state.fault_injected} /></div>
                   </section>
                   </div>
-                  <div className="space-y-5 animate-reveal [animation-delay:140ms]"><HealthPanel state={state} /><SimulationControls faultInjected={state.fault_injected} onNotice={setNotice} /></div>
+                  <div className="space-y-5 animate-reveal [animation-delay:140ms]"><HealthPanel state={state} /><SimulationControls uavId={activeUavId ?? ''} faultInjected={state.fault_injected} onNotice={setNotice} /></div>
                 </div>
               </>
             )}
