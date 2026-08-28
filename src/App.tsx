@@ -15,6 +15,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   RotateCcw,
   ShieldCheck,
   Siren,
@@ -125,6 +126,13 @@ const staticUavs: UAV[] = [
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (STATIC_DEMO) {
     if (path === '/healthz') return { status: 'ok' } as T;
+    if (path === '/uavs' && init?.method === 'POST') {
+      const payload = init?.body ? JSON.parse(String(init.body)) : {};
+      const id = `${payload.name ?? 'uav'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'uav';
+      const newUav: UAV = { id, name: payload.name ?? 'New UAV', model: payload.model ?? 'Unclassified' };
+      staticUavs.push(newUav);
+      return newUav as T;
+    }
     if (path === '/uavs') return staticUavs as T;
     if (path.endsWith('/state')) return staticState() as T;
     if (path.includes('/history')) {
@@ -301,11 +309,27 @@ function TelemetryChart({ history }: { history: Array<{ timestamp: string; rpm: 
   );
 }
 
-function UavSelector({ uavs, activeId, onSelect }: { uavs: UAV[]; activeId: string | null; onSelect: (id: string) => void }) {
+function UavSelector({ uavs, activeId, onSelect, onCreated }: { uavs: UAV[]; activeId: string | null; onSelect: (id: string) => void; onCreated: (id: string) => void }) {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [model, setModel] = useState('');
   const active = uavs.find((u) => u.id === activeId);
 
-  if (uavs.length === 0) {
+  const createUav = useMutation({
+    mutationFn: (data: { name: string; model: string }) => apiFetch<UAV>('/uavs', { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: (newUav) => {
+      queryClient.setQueryData<UAV[]>(['uavs'], (prev) => [...(prev ?? []), newUav]);
+      onCreated(newUav.id);
+      setAdding(false);
+      setName('');
+      setModel('');
+      setOpen(false);
+    },
+  });
+
+  if (uavs.length === 0 && !adding) {
     return <span className="mono text-[10px] text-muted-foreground">Loading UAVs…</span>;
   }
 
@@ -321,8 +345,8 @@ function UavSelector({ uavs, activeId, onSelect }: { uavs: UAV[]; activeId: stri
       </button>
       {open && (
         <>
-          <button aria-label="Close UAV selector" className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-2 w-[220px] rounded-sm border border-card-border bg-card shadow-2xl">
+          <button aria-label="Close UAV selector" className="fixed inset-0 z-40" onClick={() => { setOpen(false); setAdding(false); }} />
+          <div className="absolute left-0 top-full z-50 mt-2 w-[240px] rounded-sm border border-card-border bg-card shadow-2xl">
             {uavs.map((uav) => (
               <button
                 key={uav.id}
@@ -334,6 +358,43 @@ function UavSelector({ uavs, activeId, onSelect }: { uavs: UAV[]; activeId: stri
                 {uav.id === activeId && <Check className="h-3.5 w-3.5" />}
               </button>
             ))}
+            <div className="border-t border-card-border">
+              {adding ? (
+                <div className="space-y-2 p-3">
+                  <input
+                    data-testid="input-new-uav-name"
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Name (e.g. Raven Mk II)"
+                    className="w-full rounded-sm border border-border bg-background px-2.5 py-2 text-[11px] outline-none focus:border-primary/50"
+                  />
+                  <input
+                    data-testid="input-new-uav-model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="Model (e.g. MALE Class-I)"
+                    className="w-full rounded-sm border border-border bg-background px-2.5 py-2 text-[11px] outline-none focus:border-primary/50"
+                  />
+                  {createUav.isError && <p className="text-[10px] text-destructive">Could not create UAV — check API connection</p>}
+                  <div className="flex gap-2">
+                    <button data-testid="button-cancel-add-uav" onClick={() => setAdding(false)} className="flex-1 rounded-sm border border-border px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.1em] text-muted-foreground hover:text-foreground">Cancel</button>
+                    <button
+                      data-testid="button-confirm-add-uav"
+                      disabled={!name.trim() || !model.trim() || createUav.isPending}
+                      onClick={() => createUav.mutate({ name: name.trim(), model: model.trim() })}
+                      className="flex-1 rounded-sm bg-primary px-2.5 py-2 text-[10px] font-bold uppercase tracking-[.1em] text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {createUav.isPending ? 'Adding…' : 'Add UAV'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button data-testid="button-add-uav" onClick={() => setAdding(true)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[11px] text-primary transition-colors hover:bg-secondary/60">
+                  <Plus className="h-3.5 w-3.5" />Add new UAV
+                </button>
+              )}
+            </div>
           </div>
         </>
       )}
@@ -454,7 +515,7 @@ function Overview() {
           <header className="flex h-[78px] items-center justify-between border-b border-border px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
               <button aria-label="Open navigation" data-testid="button-open-navigation" className="text-muted-foreground hover:text-foreground md:hidden" onClick={() => setRailOpen(true)}><Menu className="h-5 w-5" /></button>
-              <div><div className="flex items-center gap-2"><span className="mono text-[10px] uppercase tracking-[.2em] text-primary">LIVE CONSOLE</span><span className="h-1 w-1 rounded-full bg-border" /><UavSelector uavs={uavs} activeId={activeUavId} onSelect={selectUav} /></div><h1 className="mt-1 text-lg font-extrabold tracking-[-.03em] sm:text-xl">Engine overview{activeUav ? ` — ${activeUav.name}` : ''}</h1></div>
+              <div><div className="flex items-center gap-2"><span className="mono text-[10px] uppercase tracking-[.2em] text-primary">LIVE CONSOLE</span><span className="h-1 w-1 rounded-full bg-border" /><UavSelector uavs={uavs} activeId={activeUavId} onSelect={selectUav} onCreated={selectUav} /></div><h1 className="mt-1 text-lg font-extrabold tracking-[-.03em] sm:text-xl">Engine overview{activeUav ? ` — ${activeUav.name}` : ''}</h1></div>
             </div>
             <div className="flex items-center gap-3 sm:gap-5">
               <div className="hidden text-right sm:block"><div className="mono text-[9px] uppercase tracking-[.15em] text-muted-foreground">Last packet</div><div data-testid="text-last-packet" className="mono mt-1 text-[11px] text-foreground">{lastUpdated} UTC</div></div>
